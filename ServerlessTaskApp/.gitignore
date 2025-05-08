@@ -1,0 +1,14 @@
+# Ignore Terraform state and cache
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Python __pycache__
+__pycache__/
+*.pyc
+
+# Zip files
+*.zip
+*.exe
+.terraform/
