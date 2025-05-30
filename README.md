@@ -51,7 +51,7 @@ A fully serverless RESTful Task Management API built on AWS using Lambda, API Ga
 - Custom domain + HTTPS  
 - CI/CD pipeline for auto-deployment
 
-## 👨‍💻 Author
+## Author
 
 **Steven Lewis**  
 Cloud Engineer in training | AWS | Terraform | Python  
