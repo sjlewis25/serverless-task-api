@@ -1,8 +1,8 @@
-# 🧩 Serverless Task API (AWS + Terraform)
+# Serverless Task API (AWS + Terraform)
 
 A fully serverless RESTful Task Management API built on AWS using Lambda, API Gateway, and DynamoDB — provisioned entirely with Terraform.
 
-## 📦 Features
+## Features
 
 - `GET /tasks` – List all tasks  
 - `POST /tasks` – Create a new task  
@@ -11,7 +11,7 @@ A fully serverless RESTful Task Management API built on AWS using Lambda, API Ga
 - Clean, modular project structure  
 - Secure IAM roles with least-privilege access
 
-## 🧱 Architecture
+## Architecture
 
 - **AWS Lambda** – Serverless function to handle requests  
 - **API Gateway** – Exposes REST endpoints  
@@ -19,7 +19,7 @@ A fully serverless RESTful Task Management API built on AWS using Lambda, API Ga
 - **Terraform** – Infrastructure as Code  
 - **PowerShell** – Used for packaging and zipping Lambda deployments
 
-## 🚀 Deploy the API
+## Deploy the API
 
 1. Clone the repo:  
    `git clone https://github.com/sjlewis25/serverless-task-api.git`  
@@ -34,7 +34,7 @@ A fully serverless RESTful Task Management API built on AWS using Lambda, API Ga
 4. When complete, grab the invoke URL from the output:  
    `terraform output invoke_url`
 
-## 🧪 Example Usage
+## Example Usage
 
 **Create Task (POST)**  
 `curl -X POST https://your-api-id.execute-api.us-east-1.amazonaws.com/dev/tasks \`  
@@ -44,7 +44,7 @@ A fully serverless RESTful Task Management API built on AWS using Lambda, API Ga
 **Get All Tasks (GET)**  
 `curl https://your-api-id.execute-api.us-east-1.amazonaws.com/dev/tasks`
 
-## 🛠 Future Enhancements
+## Future Enhancements
 
 - `PATCH /tasks/{id}` to mark task as completed  
 - Input validation with JSON Schema  
