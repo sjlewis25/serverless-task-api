@@ -1,6 +1,3 @@
-provider "aws" {
-  region = "us-east-1"
-}
 
 resource "aws_iam_role" "lambda_exec_role" {
   name = "lambda_exec_role"
@@ -40,11 +37,11 @@ resource "aws_iam_policy" "lambda_dynamo_policy" {
   })
 }
 
-resource "aws_iam_policy_attachment" "lambda_dynamo_policy_attach" {
-  name       = "lambda-dynamo-policy-attach"
-  roles      = [aws_iam_role.lambda_exec_role.name]
+resource "aws_iam_role_policy_attachment" "lambda_dynamo_policy_attach" {
+  role       = aws_iam_role.lambda_exec_role.name
   policy_arn = aws_iam_policy.lambda_dynamo_policy.arn
 }
+
 
 resource "aws_dynamodb_table" "tasks" {
   name         = "Tasks"
