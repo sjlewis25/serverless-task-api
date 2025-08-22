@@ -1,126 +1,111 @@
 # Serverless Task API
 
-This is a serverless task management API built on AWS. It uses Lambda for compute, API Gateway for HTTP access, DynamoDB for storage, and Terraform for infrastructure management. Bash scripts automate the packaging, deployment, and teardown processes.
+A serverless backend system that allows users to create and retrieve task data through a lightweight API. Designed using core AWS services and built to solve the problem of manual, repetitive task tracking with scalable, cost-efficient infrastructure.
 
----
+## Problem
 
-## What It Does
+Manual task tracking through spreadsheets or static tools is slow, error-prone, and not scalable. There’s no easy way to expose task data via API without overengineering a backend or maintaining servers.
 
-- Accepts HTTP GET and POST requests via API Gateway
-- Processes tasks using a Python-based Lambda function
-- Stores task data in a DynamoDB table
-- Uses IAM roles and policies to secure access
-- Deploys infrastructure and Lambda code with Terraform
+## Solution
 
----
+This project delivers a fully serverless API built on AWS using Lambda, API Gateway, and DynamoDB. Infrastructure is provisioned through Terraform, and all packaging and deployment is handled with Bash scripting for simplicity and repeatability.
+
+## Architecture
+
+- API Gateway: Exposes RESTful endpoints for HTTP access  
+- AWS Lambda (Python): Executes the logic for handling GET and POST requests  
+- DynamoDB: Stores and retrieves task data in a NoSQL table  
+- Terraform: Provisions all infrastructure as code  
+- Bash Scripts: Automate Lambda packaging, deployment, and teardown  
+- IAM: Secures access via tightly scoped roles and policies  
+
+## Business Value
+
+- Eliminates the need to manually track tasks in spreadsheets  
+- Enables instant task creation and retrieval through HTTP requests  
+- Serverless architecture minimizes cost (near $0 when idle)  
+- Provides a practical, reproducible example of infrastructure automation  
+- Makes it easy to reuse and extend for other serverless backend needs  
 
 ## Folder Structure
 
-```
-Serverless-Task-Api/
-│
-├── infrastructure/             # Terraform config and modules
-│   ├── main.tf
-│   ├── outputs.tf
-│   ├── variables.tf
-│   └── modules/
-│       └── lambda/
-│           ├── main.tf
-│           ├── outputs.tf
-│           └── variables.tf
-│
-├── lambda/                     # Lambda function code
-│   ├── task_manager.py
-│   └── utils/
-│       └── response.js
-│
-├── scripts/                    # Automation scripts
-│   ├── package.sh              # Zips the Lambda function
-│   ├── deploy.sh               # Deploys Terraform and Lambda
-│   └── teardown.sh             # Destroys Terraform infrastructure
-│
+.
+├── README.md  
+├── infrastructure/  
+│   ├── main.tf  
+│   ├── outputs.tf  
+│   ├── variables.tf  
+│   └── modules/  
+│       └── lambda/  
+│           ├── main.tf  
+│           ├── outputs.tf  
+│           └── variables.tf  
+├── lambda/  
+│   ├── task_manager.py  
+│   └── utils/  
+│       └── response.py  
+├── scripts/  
+│   ├── package.sh  
+│   ├── deploy.sh  
+│   └── teardown.sh  
 ├── .gitignore
-└── README.md
-```
 
----
+## Prerequisites
 
-## Requirements
+- AWS CLI with active credentials  
+- Terraform installed  
+- Python 3.x  
+- Bash terminal (Linux, macOS, or Git Bash on Windows)
 
-- AWS CLI configured
-- Terraform installed
-- Bash shell (macOS, Linux, or Git Bash for Windows)
-- Python 3.x
-
----
-
-## Usage
+## How to Use
 
 ### 1. Package the Lambda Function
 
-From the project root:
+    bash scripts/package.sh
 
-```bash
-bash scripts/package.sh
-```
-
-This will zip the `lambda/` code and place it at `infrastructure/modules/lambda/task_manager.zip`.
-
----
+Creates a zip file from the `lambda/` folder and copies it into the Lambda module path for Terraform.
 
 ### 2. Deploy Infrastructure
 
-```bash
-bash scripts/deploy.sh
-```
+    bash scripts/deploy.sh
 
-This script initializes Terraform, applies the infrastructure, and deploys the Lambda function. When finished, it will print the API endpoint in the terminal.
-
----
+Initializes Terraform, applies the infrastructure plan, and deploys the Lambda function. Outputs the API Gateway URL.
 
 ### 3. Test the API
 
-To get tasks:
+Replace `<invoke_url>` with the output from deployment.
 
-```bash
-curl https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/tasks
-```
+Get all tasks:
 
-To add a new task:
+    curl <invoke_url>/tasks
 
-```bash
-curl -X POST -H "Content-Type: application/json" -d '{"task": "Example task"}' https://<api-id>.execute-api.us-east-1.amazonaws.com/dev/tasks
-```
+Post a new task:
 
-Replace `<api-id>` with the actual value shown in the deployment output.
+    curl -X POST <invoke_url>/tasks \
+         -H "Content-Type: application/json" \
+         -d '{"task": "Write README"}'
 
----
+### 4. Tear Down Infrastructure
 
-### 4. Tear Down
+    bash scripts/teardown.sh
 
-To destroy the entire infrastructure:
+Destroys all provisioned infrastructure using Terraform.
 
-```bash
-bash scripts/teardown.sh
-```
+## Outputs After Deploy
 
-This will run `terraform destroy` and clean up resources.
+- `invoke_url`: API Gateway endpoint  
+- `lambda_function_name`  
+- `lambda_function_arn`
 
----
+## Future Improvements
 
-## Outputs
-
-- `invoke_url` – API Gateway endpoint
-- `lambda_function_name` – Name of the Lambda function
-- `lambda_function_arn` – ARN for the Lambda function
-
----
-
-## Notes
-
-- All `.terraform` files are excluded from Git via `.gitignore`.
-- Designed for individual development and learning purposes.
-- Make sure your AWS credentials are set before running deployment.
+- Add authentication with Cognito  
+- Support pagination and filtering  
+- Add structured logging and CloudWatch alarms  
+- Support deployment across multiple environments (dev/test/prod)  
+- Estimate and track infrastructure costs
+- Develop front-end for users
+- Integrate CI/CD pipeline using GitHub Actions for automatic deploys
 
 
 ## Author
