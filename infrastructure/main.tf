@@ -1,11 +1,10 @@
-
 resource "aws_iam_role" "lambda_exec_role" {
   name = "lambda_exec_role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action = "sts:AssumeRole",
+      Effect = "Allow",
       Principal = {
         Service = "lambda.amazonaws.com"
       }
@@ -21,7 +20,7 @@ resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
 resource "aws_iam_policy" "lambda_dynamo_policy" {
   name        = "lambda-dynamo-access"
   description = "Allow Lambda to access DynamoDB"
-  policy      = jsonencode({
+  policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
       Action = [
@@ -30,8 +29,8 @@ resource "aws_iam_policy" "lambda_dynamo_policy" {
         "dynamodb:Scan",
         "dynamodb:UpdateItem",
         "dynamodb:DeleteItem"
-      ]
-      Effect   = "Allow"
+      ],
+      Effect = "Allow",
       Resource = aws_dynamodb_table.tasks.arn
     }]
   })
@@ -41,7 +40,6 @@ resource "aws_iam_role_policy_attachment" "lambda_dynamo_policy_attach" {
   role       = aws_iam_role.lambda_exec_role.name
   policy_arn = aws_iam_policy.lambda_dynamo_policy.arn
 }
-
 
 resource "aws_dynamodb_table" "tasks" {
   name         = "Tasks"
@@ -68,6 +66,58 @@ resource "aws_api_gateway_resource" "tasks" {
   rest_api_id = aws_api_gateway_rest_api.task_api.id
   parent_id   = aws_api_gateway_rest_api.task_api.root_resource_id
   path_part   = "tasks"
+}
+
+resource "aws_api_gateway_method" "options" {
+  rest_api_id   = aws_api_gateway_rest_api.task_api.id
+  resource_id   = aws_api_gateway_resource.tasks.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  resource_id = aws_api_gateway_resource.tasks.id
+  http_method = "OPTIONS"
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_response" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  resource_id = aws_api_gateway_resource.tasks.id
+  http_method = "OPTIONS"
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+
+  depends_on = [aws_api_gateway_method.options]
+}
+
+resource "aws_api_gateway_integration_response" "options_response" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  resource_id = aws_api_gateway_resource.tasks.id
+  http_method = "OPTIONS"
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'",
+    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS,GET,POST'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_method_response.options_response]
 }
 
 resource "aws_api_gateway_method" "get_tasks" {
@@ -113,7 +163,10 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
 resource "aws_api_gateway_deployment" "task_api_deploy" {
   depends_on = [
     aws_api_gateway_integration.lambda_integration_get,
-    aws_api_gateway_integration.lambda_integration_post
+    aws_api_gateway_integration.lambda_integration_post,
+    aws_api_gateway_integration.options,
+    aws_api_gateway_method_response.options_response,
+    aws_api_gateway_integration_response.options_response
   ]
 
   rest_api_id = aws_api_gateway_rest_api.task_api.id
