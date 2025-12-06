@@ -53,8 +53,9 @@ resource "aws_dynamodb_table" "tasks" {
 }
 
 module "lambda_task_manager" {
-  source   = "./modules/lambda"
-  role_arn = aws_iam_role.lambda_exec_role.arn
+  source     = "./modules/lambda"
+  role_arn   = aws_iam_role.lambda_exec_role.arn
+  table_name = aws_dynamodb_table.tasks.name
 }
 
 resource "aws_api_gateway_rest_api" "task_api" {
@@ -67,6 +68,10 @@ resource "aws_api_gateway_resource" "tasks" {
   parent_id   = aws_api_gateway_rest_api.task_api.root_resource_id
   path_part   = "tasks"
 }
+
+# ========================================
+# CORS OPTIONS for /tasks
+# ========================================
 
 resource "aws_api_gateway_method" "options" {
   rest_api_id   = aws_api_gateway_rest_api.task_api.id
@@ -113,24 +118,21 @@ resource "aws_api_gateway_integration_response" "options_response" {
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'",
-    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS,GET,POST'",
+    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS,GET,POST,PUT,DELETE'",
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
 
   depends_on = [aws_api_gateway_method_response.options_response]
 }
 
+# ========================================
+# GET /tasks - List all tasks
+# ========================================
+
 resource "aws_api_gateway_method" "get_tasks" {
   rest_api_id   = aws_api_gateway_rest_api.task_api.id
   resource_id   = aws_api_gateway_resource.tasks.id
   http_method   = "GET"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_method" "post_tasks" {
-  rest_api_id   = aws_api_gateway_rest_api.task_api.id
-  resource_id   = aws_api_gateway_resource.tasks.id
-  http_method   = "POST"
   authorization = "NONE"
 }
 
@@ -143,6 +145,17 @@ resource "aws_api_gateway_integration" "lambda_integration_get" {
   uri                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${module.lambda_task_manager.lambda_function_arn}/invocations"
 }
 
+# ========================================
+# POST /tasks - Create task
+# ========================================
+
+resource "aws_api_gateway_method" "post_tasks" {
+  rest_api_id   = aws_api_gateway_rest_api.task_api.id
+  resource_id   = aws_api_gateway_resource.tasks.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
 resource "aws_api_gateway_integration" "lambda_integration_post" {
   rest_api_id             = aws_api_gateway_rest_api.task_api.id
   resource_id             = aws_api_gateway_resource.tasks.id
@@ -152,6 +165,136 @@ resource "aws_api_gateway_integration" "lambda_integration_post" {
   uri                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${module.lambda_task_manager.lambda_function_arn}/invocations"
 }
 
+# ========================================
+# /tasks/{id} resource
+# ========================================
+
+resource "aws_api_gateway_resource" "task_id" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  parent_id   = aws_api_gateway_resource.tasks.id
+  path_part   = "{id}"
+}
+
+# ========================================
+# CORS OPTIONS for /tasks/{id}
+# ========================================
+
+resource "aws_api_gateway_method" "task_id_options" {
+  rest_api_id   = aws_api_gateway_rest_api.task_api.id
+  resource_id   = aws_api_gateway_resource.task_id.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "task_id_options" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  resource_id = aws_api_gateway_resource.task_id.id
+  http_method = "OPTIONS"
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "task_id_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  resource_id = aws_api_gateway_resource.task_id.id
+  http_method = "OPTIONS"
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+
+  depends_on = [aws_api_gateway_method.task_id_options]
+}
+
+resource "aws_api_gateway_integration_response" "task_id_options_response" {
+  rest_api_id = aws_api_gateway_rest_api.task_api.id
+  resource_id = aws_api_gateway_resource.task_id.id
+  http_method = "OPTIONS"
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'",
+    "method.response.header.Access-Control-Allow-Methods" = "'OPTIONS,GET,PUT,DELETE'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  depends_on = [aws_api_gateway_method_response.task_id_options_response]
+}
+
+# ========================================
+# GET /tasks/{id} - Get single task
+# ========================================
+
+resource "aws_api_gateway_method" "get_task" {
+  rest_api_id   = aws_api_gateway_rest_api.task_api.id
+  resource_id   = aws_api_gateway_resource.task_id.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_integration_get_task" {
+  rest_api_id             = aws_api_gateway_rest_api.task_api.id
+  resource_id             = aws_api_gateway_resource.task_id.id
+  http_method             = aws_api_gateway_method.get_task.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${module.lambda_task_manager.lambda_function_arn}/invocations"
+}
+
+# ========================================
+# PUT /tasks/{id} - Update task
+# ========================================
+
+resource "aws_api_gateway_method" "put_task" {
+  rest_api_id   = aws_api_gateway_rest_api.task_api.id
+  resource_id   = aws_api_gateway_resource.task_id.id
+  http_method   = "PUT"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_integration_put" {
+  rest_api_id             = aws_api_gateway_rest_api.task_api.id
+  resource_id             = aws_api_gateway_resource.task_id.id
+  http_method             = aws_api_gateway_method.put_task.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${module.lambda_task_manager.lambda_function_arn}/invocations"
+}
+
+# ========================================
+# DELETE /tasks/{id} - Delete task
+# ========================================
+
+resource "aws_api_gateway_method" "delete_task" {
+  rest_api_id   = aws_api_gateway_rest_api.task_api.id
+  resource_id   = aws_api_gateway_resource.task_id.id
+  http_method   = "DELETE"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "lambda_integration_delete" {
+  rest_api_id             = aws_api_gateway_rest_api.task_api.id
+  resource_id             = aws_api_gateway_resource.task_id.id
+  http_method             = aws_api_gateway_method.delete_task.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/${module.lambda_task_manager.lambda_function_arn}/invocations"
+}
+
+# ========================================
+# Lambda permissions
+# ========================================
+
 resource "aws_lambda_permission" "api_gateway_invoke" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
@@ -160,16 +303,25 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   source_arn    = "${aws_api_gateway_rest_api.task_api.execution_arn}/dev/*"
 }
 
+# ========================================
+# API Gateway deployment
+# ========================================
+
 resource "aws_api_gateway_deployment" "task_api_deploy" {
   depends_on = [
     aws_api_gateway_integration.lambda_integration_get,
     aws_api_gateway_integration.lambda_integration_post,
     aws_api_gateway_integration.options,
     aws_api_gateway_method_response.options_response,
-    aws_api_gateway_integration_response.options_response
+    aws_api_gateway_integration_response.options_response,
+    aws_api_gateway_integration.lambda_integration_get_task,
+    aws_api_gateway_integration.lambda_integration_put,
+    aws_api_gateway_integration.lambda_integration_delete,
+    aws_api_gateway_integration.task_id_options,
+    aws_api_gateway_method_response.task_id_options_response,
+    aws_api_gateway_integration_response.task_id_options_response
   ]
 
   rest_api_id = aws_api_gateway_rest_api.task_api.id
   stage_name  = "dev"
 }
-
