@@ -1,211 +1,173 @@
+![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform)
+![AWS](https://img.shields.io/badge/Cloud-AWS-FF9900?logo=amazon-aws)
+![Lambda](https://img.shields.io/badge/Compute-Lambda-FF9900?logo=aws-lambda)
+![DynamoDB](https://img.shields.io/badge/Database-DynamoDB-4053D6?logo=amazon-dynamodb)
+![Python](https://img.shields.io/badge/Runtime-Python_3.11-3776AB?logo=python)
+
 # Serverless Task API
 
-A production-ready serverless REST API built with AWS Lambda, API Gateway, and DynamoDB, provisioned entirely with Terraform. Demonstrates serverless architecture patterns, infrastructure as code, and full CRUD operations with zero server management.
+Production-ready serverless REST API built with AWS Lambda, API Gateway, and DynamoDB. Deployed on AWS using Terraform for repeatable, infrastructure-as-code deployments.
 
-![Architecture](architecture-diagram.png)
+## Problem Statement
 
-## Table of Contents
+Organizations building web applications need backend APIs to handle data operations, but traditional server-based architectures create significant operational overhead.
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [API Endpoints](#api-endpoints)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Deployment](#deployment)
-- [Testing](#testing)
-- [Cost Estimate](#cost-estimate)
-- [Security Considerations](#security-considerations)
-- [Lessons Learned](#lessons-learned)
-- [Future Enhancements](#future-enhancements)
-- [Author](#author)
+Running a dedicated EC2 instance or container cluster for a simple CRUD API costs $15 to $50 per month minimum, even during periods of zero traffic. These servers require patching, monitoring, and capacity planning. For small teams and early-stage applications, this represents wasted spend and engineering time on infrastructure that could be spent on product development.
 
----
+Additionally, traditional architectures require manual scaling decisions. Underprovisioning leads to downtime during traffic spikes, while overprovisioning wastes money during quiet periods. Teams must choose between reliability and cost efficiency.
 
-## Overview
-
-This project showcases a serverless application architecture using AWS managed services. The API provides task management functionality with automatic scaling, pay-per-use pricing, and no infrastructure to maintain.
-
-**What it demonstrates:**
-- Serverless architecture design patterns
-- Infrastructure as code with Terraform
-- RESTful API design with proper HTTP methods
-- AWS service integration (Lambda, API Gateway, DynamoDB)
-- Error handling and input validation
-- CORS configuration for web integration
-- IAM security with least-privilege policies
-
----
+This project addresses these challenges by implementing a fully serverless architecture that scales automatically from zero to thousands of concurrent requests, costs nothing at idle, and eliminates all server management. The API handles full CRUD operations for task management while demonstrating serverless design patterns, proper error handling, and infrastructure as code practices. Total cost for typical development usage is $0 per month under AWS Free Tier.
 
 ## Architecture
 
-### Components
+![Architecture Diagram](architecture-diagram.png)
 
-**API Gateway**
-- RESTful HTTP endpoints with request validation
-- CORS enabled for web application integration
-- Integrated with AWS Lambda via proxy integration
+The API follows a serverless event-driven architecture with three layers.
 
-**AWS Lambda**
-- Python 3.11 runtime
-- Event-driven execution model
-- Automatic scaling based on demand
-- CloudWatch logging integrated
+**Request Routing Layer**
+API Gateway receives incoming HTTP requests and performs initial validation. It routes requests to the appropriate Lambda function using proxy integration and handles CORS preflight requests for web application compatibility. API Gateway also provides request throttling and usage tracking.
 
-**DynamoDB**
-- NoSQL database with on-demand billing
-- Single-table design with `id` as partition key
-- Supports high-throughput read/write operations
+**Business Logic Layer**
+AWS Lambda executes the application code in response to API Gateway events. The function parses the incoming request, determines the operation (create, read, update, delete), validates input data, and interacts with the database. Lambda scales automatically based on demand, running zero instances when idle and spinning up concurrent executions during high traffic.
 
-**Terraform**
-- Infrastructure as code for reproducible deployments
-- Modular design for reusability
-- Remote state management ready
+**Data Persistence Layer**
+DynamoDB stores task records using a single-table design with UUID-based partition keys. On-demand billing mode means the database scales read and write capacity automatically without provisioning. DynamoDB provides single-digit millisecond response times for all operations.
 
-### Data Flow
+**Component Flow**
 ```
-Client Request
-    ↓
-API Gateway (Validate & Route)
-    ↓
-Lambda Function (Process Logic)
-    ↓
-DynamoDB (Store/Retrieve Data)
-    ↓
-Lambda Function (Format Response)
-    ↓
-API Gateway (Return to Client)
+Client Request → API Gateway (Validate and Route) → Lambda Function (Process Logic) → DynamoDB (Store/Retrieve)
+                                                                                            ↓
+Client Response ← API Gateway (Return Response) ← Lambda Function (Format Response) ←------┘
 ```
 
----
+All infrastructure is provisioned through Terraform with modular configuration. The Lambda function is packaged and deployed via automated shell scripts.
 
-## Features
+## Technology Stack
 
-✅ **Full CRUD Operations**
-- Create tasks with validation
-- Read all tasks with pagination
-- Read individual tasks by ID
-- Update existing tasks
-- Delete tasks
+**Core Components**
+AWS Lambda serves as the compute layer running Python 3.11. Lambda was chosen over EC2 or ECS because the API workload is request-driven with variable traffic, making pay-per-invocation pricing significantly cheaper than always-on compute. Lambda also eliminates patching and capacity planning.
 
-✅ **Serverless Architecture**
-- Zero server management
-- Automatic scaling
-- Pay-per-request pricing
+Amazon API Gateway provides the HTTP interface. It was selected for its native Lambda integration, built-in request throttling, and ability to handle CORS configuration at the infrastructure level rather than in application code.
 
-✅ **Production-Ready Code**
-- Comprehensive error handling
-- Input validation
-- Structured logging
-- HTTP status codes following REST standards
+Amazon DynamoDB stores task data as a NoSQL database. It was chosen over RDS because the task schema is simple and flexible, the access patterns are straightforward key-value lookups, and on-demand billing avoids paying for provisioned capacity during low-traffic periods. DynamoDB also eliminates database administration tasks like backups, patching, and connection pool management.
 
-✅ **Infrastructure as Code**
-- Complete Terraform configuration
-- Modular Lambda deployment
-- Environment-based configuration
+**Infrastructure and Deployment**
+Terraform manages all AWS resource provisioning using a modular design. The Lambda function configuration is separated into its own module for reusability. Terraform creates the API Gateway, Lambda function, DynamoDB table, IAM roles, and CloudWatch log groups programmatically.
 
-✅ **Security**
-- IAM least-privilege policies
-- Secrets managed via environment variables
-- CORS properly configured
+Boto3 (AWS SDK for Python) handles all DynamoDB operations within the Lambda function, including item creation with UUID generation, conditional updates, and paginated scans.
 
----
+Bash scripts automate the packaging and deployment workflow, handling Lambda zip creation, Terraform initialization, and infrastructure provisioning in a single command.
 
-## Tech Stack
+## Key Features
 
-**Cloud Services:**
-- AWS Lambda (Python 3.11)
-- Amazon API Gateway (REST API)
-- Amazon DynamoDB (NoSQL Database)
-- AWS IAM (Security & Permissions)
-- Amazon CloudWatch (Logging & Monitoring)
+**Full CRUD Operations**
+Supports create, read, update, and delete operations for task management. Each operation includes input validation for required fields, status values (new, in_progress, completed, cancelled), and priority levels (low, medium, high, urgent). All responses follow REST conventions with appropriate HTTP status codes.
 
-**Infrastructure:**
-- Terraform 1.0+
-- Bash scripting
+**Automatic Scaling**
+Lambda scales from zero to thousands of concurrent executions based on incoming request volume. No capacity planning or scaling policies required. The API handles traffic spikes without configuration changes and costs nothing during periods of zero traffic.
 
-**Development:**
-- Python 3.11
-- Boto3 (AWS SDK)
+**Pagination Support**
+The list endpoint supports cursor-based pagination using DynamoDB's LastEvaluatedKey. Clients can specify a limit parameter (1 to 100 items, default 25) and use the returned next token to retrieve subsequent pages. This prevents large result sets from consuming excessive Lambda memory or causing client timeouts.
 
----
+**Infrastructure as Code**
+Complete Terraform configuration with modular Lambda deployment. Automated security configuration with least-privilege IAM policies. Reproducible infrastructure that can be deployed, destroyed, and redeployed in any AWS region using a single command.
+
+**Cost Efficient**
+The entire stack operates within AWS Free Tier for development and light production use, costing $0 per month for up to 1 million requests. Even at medium production volume of 1 million requests per month, total cost is approximately $4.50. This represents 90% or greater savings compared to running equivalent functionality on a dedicated EC2 instance.
+
+## Deployment
+
+**Prerequisites**
+AWS Account with appropriate permissions
+AWS CLI configured with credentials
+Terraform version 1.0 or higher
+Python 3.11 or later
+Bash shell (Linux, macOS, or Git Bash on Windows)
+
+**Local Setup**
+
+Clone the repository and navigate to the project directory:
+```
+git clone https://github.com/sjlewis25/serverless-task-api.git
+cd serverless-task-api
+```
+
+Verify all prerequisites are installed:
+```
+terraform version
+python3 --version
+aws sts get-caller-identity
+```
+
+**AWS Deployment (Automated)**
+
+Package the Lambda function and deploy all infrastructure:
+```
+cd scripts
+./package.sh
+./deploy.sh
+```
+
+The deployment script initializes Terraform, creates a deployment plan, provisions all AWS resources, and outputs the API Gateway endpoint URL.
+
+Expected output:
+```
+api_endpoint = "https://abc123xyz.execute-api.us-east-1.amazonaws.com/dev"
+```
+
+**AWS Deployment (Manual)**
+
+Package the Lambda function:
+```
+cd lambda
+zip -r ../infrastructure/modules/lambda/task_manager.zip .
+cd ..
+```
+
+Deploy with Terraform:
+```
+cd infrastructure
+terraform init
+terraform plan
+terraform apply
+```
+
+Retrieve the API endpoint:
+```
+terraform output api_endpoint
+```
+
+**Verify the Deployment**
+
+Test the API by creating a task:
+```
+export API_URL="https://abc123xyz.execute-api.us-east-1.amazonaws.com/dev"
+
+curl -X POST $API_URL/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Test deployment", "priority": "high"}'
+```
+
+List all tasks to confirm data persistence:
+```
+curl $API_URL/tasks
+```
 
 ## API Endpoints
 
-### List All Tasks
-```http
-GET /tasks
+**Create Task**
 ```
-
-**Query Parameters:**
-- `limit` (optional): Number of tasks to return (1-100, default: 25)
-- `next` (optional): Pagination token for next page
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "task": "Deploy infrastructure",
-      "status": "new",
-      "priority": "high",
-      "created_at": 1703001234,
-      "updated_at": 1703001234
-    }
-  ],
-  "count": 1,
-  "next": null
-}
-```
-
----
-
-### Get Single Task
-```http
-GET /tasks/{id}
-```
-
-**Response:**
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "task": "Deploy infrastructure",
-  "status": "new",
-  "priority": "high",
-  "created_at": 1703001234,
-  "updated_at": 1703001234
-}
-```
-
-**Error Response (404):**
-```json
-{
-  "message": "Task not found"
-}
-```
-
----
-
-### Create Task
-```http
 POST /tasks
 Content-Type: application/json
-```
 
-**Request Body:**
-```json
+Request Body:
 {
   "task": "Write documentation",
   "status": "new",
   "priority": "medium"
 }
-```
 
-**Response (201 Created):**
-```json
+Response (201 Created):
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "task": {
@@ -217,550 +179,201 @@ Content-Type: application/json
     "updated_at": 1703001234
   }
 }
+
+Validation: "task" is required and must be non-empty. "status" accepts new, in_progress, completed, or cancelled. "priority" accepts low, medium, high, or urgent.
 ```
 
-**Validation Rules:**
-- `task` (required): Non-empty string
-- `status` (optional): One of `new`, `in_progress`, `completed`, `cancelled`
-- `priority` (optional): One of `low`, `medium`, `high`, `urgent`
+**List All Tasks**
+```
+GET /tasks?limit=25&next=<pagination_token>
 
----
+Response (200 OK):
+{
+  "items": [...],
+  "count": 25,
+  "next": "<pagination_token_or_null>"
+}
+```
 
-### Update Task
-```http
+**Get Single Task**
+```
+GET /tasks/{id}
+
+Response (200 OK): Returns the task object.
+Response (404 Not Found): {"message": "Task not found"}
+```
+
+**Update Task**
+```
 PUT /tasks/{id}
 Content-Type: application/json
-```
 
-**Request Body (all fields optional):**
-```json
+Request Body (all fields optional):
 {
-  "task": "Updated task description",
+  "task": "Updated description",
   "status": "in_progress",
   "priority": "urgent"
 }
+
+Response (200 OK): Returns success message with updated task object.
+Response (404 Not Found): {"message": "Task not found"}
 ```
 
-**Response (200 OK):**
-```json
-{
-  "message": "Task updated successfully",
-  "task": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "task": "Updated task description",
-    "status": "in_progress",
-    "priority": "urgent",
-    "created_at": 1703001234,
-    "updated_at": 1703001500
-  }
-}
+**Delete Task**
 ```
-
-**Error Response (404):**
-```json
-{
-  "message": "Task not found"
-}
-```
-
----
-
-### Delete Task
-```http
 DELETE /tasks/{id}
+
+Response (200 OK): {"message": "Task deleted successfully", "id": "..."}
+Response (404 Not Found): {"message": "Task not found"}
 ```
 
-**Response (200 OK):**
-```json
-{
-  "message": "Task deleted successfully",
-  "id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-**Error Response (404):**
-```json
-{
-  "message": "Task not found"
-}
-```
-
----
-
-## Project Structure
-```
-.
-├── infrastructure/               # Terraform configuration
-│   ├── main.tf                  # Core infrastructure resources
-│   ├── outputs.tf               # Output values (API endpoint)
-│   ├── variables.tf             # Input variables
-│   └── modules/
-│       └── lambda/              # Lambda module
-│           ├── main.tf          # Lambda function definition
-│           ├── variables.tf     # Module variables
-│           └── outputs.tf       # Module outputs
-│
-├── lambda/                       # Python application code
-│   ├── task_manager.py          # Main Lambda handler
-│   └── utils/
-│       └── response.py          # Response formatting utilities
-│
-├── scripts/                      # Deployment automation
-│   ├── package.sh               # Package Lambda deployment
-│   ├── deploy.sh                # Deploy infrastructure
-│   └── teardown.sh              # Destroy resources
-│
-├── task-ui/                      # React frontend (optional)
-│   ├── src/
-│   └── public/
-│
-├── .gitignore
-└── README.md
-```
-
----
-
-## Prerequisites
-
-- **AWS Account** with appropriate permissions
-- **AWS CLI** configured with credentials
-- **Terraform** 1.0 or later
-- **Python** 3.11+
-- **Bash** shell (Linux, macOS, or Git Bash on Windows)
-
----
-
-## Installation
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/sjlewis25/serverless-task-api.git
-cd serverless-task-api
-```
-
-### 2. Configure AWS Credentials
-```bash
-aws configure
-# Enter your AWS Access Key ID
-# Enter your AWS Secret Access Key
-# Set default region (e.g., us-east-1)
-```
-
-### 3. Verify Prerequisites
-```bash
-# Check Terraform
-terraform version
-
-# Check Python
-python3 --version
-
-# Check AWS CLI
-aws sts get-caller-identity
-```
-
----
-
-## Deployment
-
-### Option 1: Automated Deployment (Recommended)
-```bash
-# Navigate to scripts directory
-cd scripts
-
-# Package Lambda function
-./package.sh
-
-# Deploy infrastructure
-./deploy.sh
-```
+## What I Learned
 
-The deployment script will:
-1. Initialize Terraform
-2. Create deployment plan
-3. Deploy all AWS resources
-4. Output the API Gateway endpoint URL
-
-**Expected output:**
-```
-Outputs:
-
-api_endpoint = "https://abc123xyz.execute-api.us-east-1.amazonaws.com/dev"
-```
+**Challenge: DynamoDB Key Design**
+When initially designing the database schema, I tried using auto-incrementing integer IDs, which is standard practice in relational databases like MySQL or PostgreSQL. DynamoDB does not support auto-increment because it is a distributed system where sequential ID generation would create a bottleneck. Switching to UUID-based partition keys resolved the issue and provided globally unique identifiers without coordination between nodes. This experience reinforced that NoSQL databases require fundamentally different design patterns than relational databases, particularly around key selection and data modeling.
 
----
+**Challenge: API Gateway Path Parameter Extraction**
+After deploying the API, requests to individual task endpoints like /tasks/{id} returned errors because the Lambda function could not extract the task ID from the request. The issue was that API Gateway proxy integration passes the entire HTTP request as a single event object rather than pre-parsing path parameters into discrete variables. Building a helper function to parse the request path and extract the ID from the last URL segment resolved the issue. This highlighted the difference between proxy integration (raw request passthrough) and non-proxy integration (pre-parsed parameters) in API Gateway.
 
-### Option 2: Manual Deployment
-```bash
-# Package Lambda function
-cd lambda
-zip -r ../infrastructure/modules/lambda/task_manager.zip .
-cd ..
+**Challenge: CORS Configuration Across Two Layers**
+During frontend integration testing, the browser blocked all API requests with CORS errors despite having configured CORS headers in the Lambda response. The root cause was that CORS requires configuration at two separate layers. API Gateway must handle OPTIONS preflight requests and return proper Access-Control headers, AND the Lambda function must include CORS headers in every response. Configuring only one layer is insufficient because the browser sends a preflight OPTIONS request before the actual request, and both must return valid CORS headers. Adding the OPTIONS method to API Gateway with appropriate headers alongside the existing Lambda response headers resolved the issue.
 
-# Deploy with Terraform
-cd infrastructure
-terraform init
-terraform plan
-terraform apply
+**Challenge: Lambda Handler Naming Convention**
+The initial deployment failed immediately with a "Handler not found" error in CloudWatch logs. The Terraform configuration specified the handler as task_manager.handler, but the actual Python function was defined with a different name. The Lambda handler format follows the pattern filename.function_name, where both parts must exactly match the deployed code. Aligning the Terraform handler configuration with the actual Python file and function name resolved the error. This reinforced the importance of treating infrastructure configuration and application code as tightly coupled, where changes to one must be reflected in the other.
 
-# Save the API endpoint
-terraform output api_endpoint
-```
+**Challenge: Hardcoded Resource Names**
+The Lambda function initially failed to find the DynamoDB table because the table name was hardcoded in the Python code. When Terraform created the table with a different name based on the environment variable configuration, the function could not connect. Passing the table name as an environment variable through the Terraform module eliminated the dependency on hardcoded values. This experience demonstrated why infrastructure outputs should drive application configuration rather than the reverse, ensuring that resource names remain consistent across the entire deployment.
 
----
-
-## Testing
-
-### Using cURL
-```bash
-# Set API endpoint (replace with your output)
-export API_URL="https://abc123xyz.execute-api.us-east-1.amazonaws.com/dev"
-
-# Create a task
-curl -X POST $API_URL/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"task": "Test deployment", "priority": "high"}'
-
-# Save the returned task ID
-export TASK_ID="<paste-task-id-here>"
+**Skills Developed**
+Gained practical experience designing serverless architectures with event-driven compute and NoSQL data stores. Developed proficiency in DynamoDB single-table design patterns including partition key selection, on-demand capacity, and cursor-based pagination. Improved understanding of API Gateway integration types, CORS mechanics, and request routing. Strengthened Terraform skills through modular design with separate Lambda modules, variable passing between modules, and automated deployment scripting. Deepened knowledge of IAM least-privilege policies by crafting specific permissions for Lambda-to-DynamoDB and Lambda-to-CloudWatch interactions.
 
-# List all tasks
-curl $API_URL/tasks
-
-# Get specific task
-curl $API_URL/tasks/$TASK_ID
-
-# Update task
-curl -X PUT $API_URL/tasks/$TASK_ID \
-  -H "Content-Type: application/json" \
-  -d '{"status": "in_progress", "priority": "urgent"}'
-
-# Delete task
-curl -X DELETE $API_URL/tasks/$TASK_ID
-
-# Verify deletion (should return 404)
-curl $API_URL/tasks/$TASK_ID
-```
-
----
-
-### Using Postman
-
-1. Import the API endpoint: `{{api_url}}/tasks`
-2. Set environment variable `api_url` to your API Gateway URL
-3. Test each endpoint with the request bodies shown above
-
----
-
-### Using Python
-```python
-import requests
-import json
-
-API_URL = "https://abc123xyz.execute-api.us-east-1.amazonaws.com/dev"
-
-# Create task
-response = requests.post(
-    f"{API_URL}/tasks",
-    json={"task": "Test from Python", "priority": "medium"}
-)
-task = response.json()
-task_id = task['id']
-
-# Get task
-response = requests.get(f"{API_URL}/tasks/{task_id}")
-print(response.json())
-
-# Update task
-response = requests.put(
-    f"{API_URL}/tasks/{task_id}",
-    json={"status": "completed"}
-)
-print(response.json())
-
-# Delete task
-response = requests.delete(f"{API_URL}/tasks/{task_id}")
-print(response.json())
-```
-
----
-
-## Cost Estimate
-
-This infrastructure costs approximately **$0-2/month** for personal/hobby use:
-
-| Service | Free Tier | Cost After Free Tier |
-|---------|-----------|---------------------|
-| **API Gateway** | 1M requests/month | $3.50 per million requests |
-| **Lambda** | 1M requests/month<br>400,000 GB-seconds compute | $0.20 per million requests<br>$0.0000166667 per GB-second |
-| **DynamoDB** | 25 GB storage<br>25 read/write units | $1.25 per million reads<br>$1.25 per million writes |
-| **CloudWatch Logs** | 5 GB ingestion | $0.50 per GB |
-
-**Example Usage Costs:**
-
-**Hobby Usage** (100 requests/day):
-- API Gateway: Free tier
-- Lambda: Free tier
-- DynamoDB: Free tier
-- **Total: $0/month**
-
-**Light Production** (100,000 requests/month):
-- API Gateway: Free tier
-- Lambda: Free tier
-- DynamoDB: ~$0.25
-- CloudWatch: ~$0.50
-- **Total: ~$0.75/month**
-
-**Medium Production** (1M requests/month):
-- API Gateway: Free tier
-- Lambda: Free tier
-- DynamoDB: ~$2.50
-- CloudWatch: ~$2.00
-- **Total: ~$4.50/month**
-
----
-
-## Infrastructure Details
-
-### Lambda Configuration
-```hcl
-Runtime: Python 3.11
-Memory: 256 MB (configurable)
-Timeout: 30 seconds
-Concurrent Executions: 10 (configurable)
-```
-
-### DynamoDB Configuration
-```hcl
-Billing Mode: PAY_PER_REQUEST (on-demand)
-Primary Key: id (String)
-Attributes: Flexible schema (NoSQL)
-```
-
-### IAM Permissions
-
-Lambda execution role includes:
-- `logs:CreateLogGroup` - CloudWatch log group creation
-- `logs:CreateLogStream` - Log stream management
-- `logs:PutLogEvents` - Write logs
-- `dynamodb:GetItem` - Read single item
-- `dynamodb:PutItem` - Create/replace item
-- `dynamodb:Scan` - List all items
-- `dynamodb:UpdateItem` - Modify existing item
-- `dynamodb:DeleteItem` - Remove item
-
----
-
-## Monitoring
-
-### CloudWatch Metrics
-
-**Lambda Metrics:**
-- Invocation count
-- Error rate
-- Duration (latency)
-- Throttles
-
-**API Gateway Metrics:**
-- Request count
-- 4XX errors (client errors)
-- 5XX errors (server errors)
-- Latency
-
-### View Logs
-```bash
-# Tail Lambda logs in real-time
-aws logs tail /aws/lambda/task-manager --follow
-
-# Query specific errors
-aws logs filter-log-events \
-  --log-group-name /aws/lambda/task-manager \
-  --filter-pattern "ERROR"
-```
-
----
+## Troubleshooting
+
+**Lambda Returns "Handler Not Found"**
+Verify the handler configuration in Terraform matches the Python file and function name. The format is filename.function_name, so task_manager.handler means Terraform expects a file called task_manager.py with a function called handler. Check that the Lambda zip package contains the Python file at the root level, not nested inside a subdirectory. Repackage using the package.sh script and redeploy.
+
+**API Returns 502 Bad Gateway**
+This indicates the Lambda function is crashing. Check CloudWatch logs for the specific error by running aws logs tail /aws/lambda/task-manager --follow. Common causes include missing environment variables (DynamoDB table name not set), incorrect IAM permissions (Lambda cannot access DynamoDB), or Python import errors in the deployment package. Verify environment variables are set in the Terraform Lambda module configuration.
+
+**CORS Errors in Browser Console**
+Confirm that both API Gateway and Lambda are configured for CORS. API Gateway must have an OPTIONS method on each resource path returning Access-Control-Allow-Origin, Access-Control-Allow-Methods, and Access-Control-Allow-Headers. Lambda responses must also include these headers. Test with curl first (which ignores CORS) to verify the API itself works, then debug CORS separately.
+
+**DynamoDB Returns Access Denied**
+The Lambda execution role is missing required DynamoDB permissions. Check the IAM policy attached to the Lambda role includes dynamodb:GetItem, dynamodb:PutItem, dynamodb:Scan, dynamodb:UpdateItem, and dynamodb:DeleteItem. Verify the policy's Resource ARN matches the actual DynamoDB table ARN. Run aws iam get-role-policy to inspect the current permissions.
+
+**Tasks Not Persisting After Creation**
+Verify the DynamoDB table exists and the Lambda environment variable points to the correct table name. Run aws dynamodb list-tables to confirm the table was created. Check CloudWatch logs for PutItem errors. If the table exists but writes fail, the issue is likely an IAM permission problem or a mismatch between the table name in the environment variable and the actual table name.
+
+## Cost Analysis
+
+**Development and Testing**
+Zero monthly cost under AWS Free Tier. Lambda provides 1 million free requests and 400,000 GB-seconds of compute per month. API Gateway includes 1 million free requests. DynamoDB offers 25 GB of storage and 25 read/write capacity units. CloudWatch includes 5 GB of log ingestion. Typical development usage stays well within these limits.
+
+**AWS Production Deployment**
+
+| Component | Free Tier Included | Cost After Free Tier |
+|-----------|-------------------|---------------------|
+| API Gateway | 1M requests/month | $3.50 per million requests |
+| Lambda | 1M requests, 400K GB-seconds | $0.20 per million requests |
+| DynamoDB | 25 GB storage, 25 RCU/WCU | $1.25 per million reads/writes |
+| CloudWatch Logs | 5 GB ingestion | $0.50 per GB |
+
+**Usage Scenario Costs**
+
+| Scenario | Monthly Requests | Monthly Cost |
+|----------|-----------------|-------------|
+| Hobby/Development | 3,000 | $0 |
+| Light Production | 100,000 | $0.75 |
+| Medium Production | 1,000,000 | $4.50 |
+
+**Cost Optimization Strategies**
+Use on-demand DynamoDB billing rather than provisioned capacity for unpredictable workloads. Configure Lambda memory at 256 MB rather than the default 128 MB, as the slight cost increase is offset by faster execution times that reduce billed duration. Set CloudWatch log retention to 14 days rather than indefinite to prevent storage cost accumulation. Use Lambda reserved concurrency to cap maximum simultaneous executions and prevent runaway costs from unexpected traffic spikes.
+
+**Comparison to Traditional Architecture**
+Running equivalent functionality on a t3.small EC2 instance with an RDS db.t3.micro database costs approximately $25 per month regardless of traffic volume. An ECS Fargate deployment with minimum capacity costs approximately $15 per month. This serverless implementation provides the same functionality at $0 to $4.50 per month depending on usage, representing 70 to 100% cost savings while eliminating all server management overhead.
 
 ## Security Considerations
 
-### Current Implementation
+**Network Security**
+API Gateway provides the only public-facing endpoint. Lambda functions execute within AWS-managed VPC infrastructure with no direct internet exposure. DynamoDB communication occurs over AWS internal networks using IAM-based authentication rather than network-level access controls. All API traffic is encrypted in transit via HTTPS enforced by API Gateway.
 
-✅ **IAM-based authentication** between AWS services
-✅ **Least-privilege IAM policies** for Lambda
-✅ **Environment variables** for configuration
-✅ **CloudWatch logging** for audit trail
-✅ **Input validation** for all API requests
-✅ **CORS properly configured** for web integration
+**Data Protection**
+DynamoDB encrypts all data at rest using AWS-managed encryption keys by default. Task data is stored with UUID-based identifiers that prevent enumeration attacks. Input validation on all API endpoints rejects malformed requests before they reach the database. CloudWatch logs provide a complete audit trail of all API invocations and Lambda executions.
 
-### Production Enhancements
+**AWS IAM Best Practices**
+Lambda execution role follows least-privilege principle with permissions scoped to specific DynamoDB actions (GetItem, PutItem, Scan, UpdateItem, DeleteItem) and specific CloudWatch actions (CreateLogGroup, CreateLogStream, PutLogEvents). No wildcard permissions are used. Resource ARNs are scoped to the specific DynamoDB table rather than account-wide access. No hardcoded credentials exist in application code or Terraform configuration.
 
-For production deployment, consider adding:
+## Future Enhancements
 
-**Authentication & Authorization:**
-- AWS Cognito for user authentication
-- API Gateway API keys for rate limiting
-- OAuth 2.0 / JWT token validation
+Add AWS Cognito user pool integration for user authentication and role-based access control, enabling multi-tenant task management with per-user data isolation. Implement API Gateway API keys with usage plans for rate limiting and client identification.
 
-**Network Security:**
-- VPC endpoints for private Lambda-to-DynamoDB communication
-- AWS WAF rules on API Gateway to block common attacks
-- Request throttling and rate limiting
+Configure CloudWatch dashboards for real-time API monitoring including invocation counts, error rates, latency percentiles, and DynamoDB consumed capacity. Add SNS alerting for Lambda error thresholds and sustained high latency.
 
-**Data Security:**
-- DynamoDB encryption at rest (enabled by default)
-- Encryption in transit via HTTPS
-- Sensitive data encryption with AWS KMS
+Implement CI/CD pipeline using GitHub Actions to automate testing, Lambda packaging, and Terraform deployment on every push to main branch. Add automated integration tests using Pytest that validate all CRUD operations against a deployed test environment.
 
-**Monitoring & Compliance:**
-- AWS CloudTrail for API call auditing
-- GuardDuty for threat detection
-- AWS Config for compliance monitoring
+Enable AWS X-Ray distributed tracing to visualize request flow from API Gateway through Lambda to DynamoDB, enabling performance bottleneck identification and latency optimization.
 
----
+Add DynamoDB Global Tables for multi-region replication to support disaster recovery and low-latency access from multiple geographic regions. Configure DynamoDB Streams with Lambda triggers for event-driven processing such as task completion notifications.
 
-## Lessons Learned
+Implement API Gateway response caching with configurable TTL to reduce Lambda invocations and DynamoDB reads for frequently accessed task lists, improving response times and reducing costs for read-heavy workloads.
 
-### Challenge 1: DynamoDB Key Design
+## Production Readiness Checklist
 
-**Problem:** Initially tried using auto-incrementing IDs (SQL thinking)
+**Implemented**
+- Full CRUD REST API with input validation and error handling
+- Serverless architecture with automatic scaling and pay-per-use pricing
+- Infrastructure as code with modular Terraform configuration
+- IAM least-privilege policies for all service interactions
+- CORS configuration for web application integration
+- Automated deployment and teardown scripts
+- Pagination support for large result sets
+- CloudWatch logging for all Lambda executions
 
-**Solution:** Switched to UUID-based IDs which are more DynamoDB-friendly
-
-**Lesson:** NoSQL databases require different design patterns than relational databases. UUIDs work better for distributed systems.
-
----
-
-### Challenge 2: API Gateway Path Parameters
-
-**Problem:** Lambda couldn't extract task ID from `/tasks/{id}` path
-
-**Solution:** Created helper function to parse path and extract ID from the last segment
-
-**Lesson:** AWS Lambda proxy integration passes the entire request object; you need to parse path parameters manually.
-
----
-
-### Challenge 3: CORS Configuration
-
-**Problem:** Frontend couldn't call API due to CORS restrictions
-
-**Solution:** Added OPTIONS method with proper CORS headers in API Gateway
-
-**Lesson:** When building APIs for web frontends, CORS must be configured on BOTH the API Gateway OPTIONS method AND Lambda response headers.
-
----
-
-### Challenge 4: Lambda Handler Naming
-
-**Problem:** Initial deployment failed with "Handler not found" error
-
-**Solution:** Aligned handler name in Terraform (`task_manager.handler`) with actual Python function name
-
-**Lesson:** The Lambda handler format is `filename.function_name`. Terraform must match the actual code structure.
-
----
-
-### Challenge 5: Environment Variables
-
-**Problem:** Lambda couldn't find DynamoDB table name
-
-**Solution:** Passed table name as environment variable through Terraform module
-
-**Lesson:** Never hardcode resource names. Use Terraform outputs and environment variables for configuration.
-
----
+**Required for Production**
+- Authentication and authorization via AWS Cognito or JWT validation
+- API Gateway throttling and rate limiting with usage plans
+- CI/CD pipeline for automated testing and deployment
+- CloudWatch dashboards and SNS alerting for operational visibility
+- DynamoDB backup strategy with point-in-time recovery enabled
+- Custom domain name with SSL certificate for API endpoint
+- Request/response logging with sensitive data masking
+- Load testing to establish baseline performance metrics
+- Web Application Firewall (WAF) rules on API Gateway
 
 ## Teardown
 
 To destroy all infrastructure and avoid ongoing costs:
-```bash
+```
 cd scripts
 ./teardown.sh
 ```
 
-Or manually with Terraform:
-```bash
+Or manually:
+```
 cd infrastructure
 terraform destroy
 ```
 
-**Warning:** This will permanently delete:
-- The DynamoDB table and all tasks
-- The Lambda function
-- The API Gateway
-- All CloudWatch logs (after retention period)
-
----
-
-## Future Enhancements
-
-### Features
-- [ ] Task categories and tags
-- [ ] Due dates and reminders
-- [ ] Task assignment to users
-- [ ] File attachments via S3
-- [ ] Task comments and activity history
-
-### Authentication
-- [ ] AWS Cognito user pools
-- [ ] API key management
-- [ ] Role-based access control (RBAC)
-
-### Operations
-- [ ] CloudWatch dashboards for visualization
-- [ ] SNS alerts for Lambda errors
-- [ ] X-Ray for distributed tracing
-- [ ] Automated testing with Pytest
-- [ ] CI/CD pipeline with GitHub Actions
-
-### Performance
-- [ ] DynamoDB auto-scaling for high traffic
-- [ ] API Gateway caching
-- [ ] Lambda reserved concurrency
-- [ ] DynamoDB Global Tables for multi-region
-
----
-
-## Why This Project
-
-I built this to demonstrate:
-
-**Serverless Architecture** - No servers to manage, automatic scaling, pay-per-use pricing
-
-**Infrastructure as Code** - Reproducible deployments, version-controlled infrastructure
-
-**AWS Service Integration** - API Gateway, Lambda, and DynamoDB working together seamlessly
-
-**Production Thinking** - Error handling, validation, monitoring, security, cost optimization
-
-**Full-Stack Capability** - Backend API with optional frontend integration
-
-This project serves as a foundation for building scalable serverless applications and demonstrates practical cloud engineering skills.
-
----
-
-## Related Projects
-
-- [Business Automation System](https://github.com/sjlewis25/Business-Automation-System) - Three-tier AWS architecture with VPC, EC2, RDS
-- [EC2 Auto-Remediation](https://github.com/sjlewis25/ec2-auto-remediation) - Event-driven automation with EventBridge and Lambda
-- [Docker CI/CD Pipeline](https://github.com/sjlewis25/AWS-Docker-CICD) - Containerized deployments with ECS Fargate
-
----
-
-## Author
-
-**Steven Lewis**
-- Cloud Engineer | AWS Certified Solutions Architect
-- GitHub: [@sjlewis25](https://github.com/sjlewis25)
-- LinkedIn: [steven-lewis-fl](https://linkedin.com/in/steven-lewis-fl)
-- Email: steven.j.lewis.2024@gmail.com
-
----
+This permanently deletes the DynamoDB table and all stored tasks, the Lambda function, the API Gateway, and all associated IAM roles and CloudWatch log groups.
 
 ## License
 
-This project is open source and available for educational purposes.
+MIT License. See LICENSE file for details.
 
----
+## Author
+
+Steven Lewis
+AWS Solutions Architect Associate
+AWS Cloud Practitioner
+GitHub: github.com/sjlewis25
+LinkedIn: linkedin.com/in/steven-lewis-fl
 
 ## Acknowledgments
 
-Built with AWS serverless technologies and Terraform as part of a cloud engineering portfolio.
+Built as part of cloud engineering skills development. Serverless architecture patterns inspired by AWS Well-Architected Framework and AWS Serverless Application Lens best practices.
+
+## Acknowledgments
+
+Built as part of cloud engineering skills development. Serverless architecture patterns inspired by AWS Well-Architected Framework and AWS Serverless Application Lens best practices.
+This project is open source and available for educational purposes.
+
