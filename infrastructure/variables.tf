@@ -1,20 +1,20 @@
 variable "project" {
-  type = string
+  type    = string
   default = "serverless-task-api"
 }
 
 variable "environment" {
-  type = string
+  type    = string
   default = "dev"
 }
 
 variable "region" {
-  type = string
+  type    = string
   default = "us-east-1"
 }
 
 variable "owner" {
-  type = string
+  type    = string
   default = "steve"
 }
 
@@ -27,6 +27,18 @@ variable "tf_lock_table" {
 }
 
 variable "table_name" {
-  type = string
+  type    = string
   default = "tasks"
+}
+
+variable "cors_origin" {
+  type        = string
+  description = "Allowed CORS origin (e.g. https://example.com). Defaults to wildcard."
+  default     = "*"
+}
+
+variable "alert_email" {
+  type        = string
+  description = "Email address for CloudWatch alarm notifications. Leave empty to skip subscription."
+  default     = ""
 }
