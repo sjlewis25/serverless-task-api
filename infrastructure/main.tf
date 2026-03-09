@@ -125,7 +125,7 @@ resource "aws_dynamodb_table" "tasks" {
   }
 
   attribute {
-    name = "entity_type"
+    name = "user_id"
     type = "S"
   }
 
@@ -135,8 +135,8 @@ resource "aws_dynamodb_table" "tasks" {
   }
 
   global_secondary_index {
-    name            = "entity_type-created_at-index"
-    hash_key        = "entity_type"
+    name            = "user_id-created_at-index"
+    hash_key        = "user_id"
     range_key       = "created_at"
     projection_type = "ALL"
   }

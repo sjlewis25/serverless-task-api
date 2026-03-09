@@ -28,8 +28,7 @@ for _h in log.handlers:
 dynamo = boto3.resource("dynamodb")
 table  = dynamo.Table(os.environ["TABLE_NAME"])
 
-GSI_NAME         = "entity_type-created_at-index"
-ENTITY_TYPE      = "TASK"
+GSI_NAME         = "user_id-created_at-index"
 TASK_MAX_LEN     = 1000
 VALID_STATUSES   = {"new", "in_progress", "completed", "cancelled"}
 VALID_PRIORITIES = {"low", "medium", "high", "urgent"}
@@ -49,19 +48,25 @@ def _task_id_from_path(event):
     return None
 
 
+def _user_id(event):
+    """Extract the Cognito sub claim — unique, stable identifier per user."""
+    return event["requestContext"]["authorizer"]["claims"]["sub"]
+
+
 def handler(event, context):
-    method = event.get("httpMethod", "")
-    path   = event.get("path", "")
-    log.info(json.dumps({"request": f"{method} {path}"}))
+    method  = event.get("httpMethod", "")
+    path    = event.get("path", "")
+    user_id = _user_id(event)
+    log.info(json.dumps({"request": f"{method} {path}", "user": user_id}))
 
     on_collection = path.rstrip("/").endswith("/tasks") or path == "/tasks"
     on_item       = "/tasks/" in path
 
     if on_collection:
         if method == "GET":
-            return list_tasks(event)
+            return list_tasks(event, user_id)
         if method == "POST":
-            return create_task(event)
+            return create_task(event, user_id)
         return json_response(405, {"message": "Method Not Allowed"})
 
     if on_item:
@@ -69,26 +74,26 @@ def handler(event, context):
         if not task_id:
             return json_response(400, {"message": "Invalid task ID"})
         if method == "GET":
-            return get_task(task_id)
+            return get_task(task_id, user_id)
         if method == "PUT":
-            return update_task(task_id, event)
+            return update_task(task_id, event, user_id)
         if method == "DELETE":
-            return delete_task(task_id)
+            return delete_task(task_id, user_id)
         return json_response(405, {"message": "Method Not Allowed"})
 
     return json_response(404, {"message": "Not Found"})
 
 
-def list_tasks(event):
+def list_tasks(event, user_id):
     params = event.get("queryStringParameters") or {}
     limit  = min(int(params.get("limit", "25")), 100)
     token  = params.get("next")
 
     query_args = {
-        "IndexName":                GSI_NAME,
-        "KeyConditionExpression":   Key("entity_type").eq(ENTITY_TYPE),
-        "Limit":                    limit,
-        "ScanIndexForward":         False,  # newest first
+        "IndexName":              GSI_NAME,
+        "KeyConditionExpression": Key("user_id").eq(user_id),
+        "Limit":                  limit,
+        "ScanIndexForward":       False,  # newest first
     }
 
     if token:
@@ -119,10 +124,10 @@ def list_tasks(event):
     })
 
 
-def get_task(task_id):
+def get_task(task_id, user_id):
     try:
         resp = table.get_item(Key={"id": task_id})
-        if "Item" not in resp:
+        if "Item" not in resp or resp["Item"].get("user_id") != user_id:
             return json_response(404, {"message": "Task not found"})
         log.info(json.dumps({"action": "get_task", "id": task_id}))
         return json_response(200, resp["Item"])
@@ -131,7 +136,7 @@ def get_task(task_id):
         return json_response(500, {"message": "Failed to retrieve task"})
 
 
-def create_task(event):
+def create_task(event, user_id):
     body = _json(event)
 
     if "task" not in body:
@@ -155,9 +160,9 @@ def create_task(event):
     now     = int(time.time())
 
     item = {
-        "id":          task_id,
-        "entity_type": ENTITY_TYPE,
-        "task":        task_text,
+        "id":         task_id,
+        "user_id":    user_id,
+        "task":       task_text,
         "status":      status,
         "priority":    priority,
         "created_at":  now,
@@ -176,12 +181,12 @@ def create_task(event):
     return json_response(201, {"id": task_id, "task": item})
 
 
-def update_task(task_id, event):
+def update_task(task_id, event, user_id):
     body = _json(event)
 
     update_expr      = ["#updated_at = :updated_at"]
     expr_attr_names  = {"#updated_at": "updated_at"}
-    expr_attr_values = {":updated_at": int(time.time())}
+    expr_attr_values = {":updated_at": int(time.time()), ":owner": user_id}
 
     if "task" in body:
         task_text = body["task"].strip()
@@ -216,7 +221,7 @@ def update_task(task_id, event):
             UpdateExpression="SET " + ", ".join(update_expr),
             ExpressionAttributeNames=expr_attr_names,
             ExpressionAttributeValues=expr_attr_values,
-            ConditionExpression="attribute_exists(id)",
+            ConditionExpression="attribute_exists(id) AND user_id = :owner",
             ReturnValues="ALL_NEW",
         )
         log.info(json.dumps({"action": "update_task", "id": task_id}))
@@ -228,11 +233,12 @@ def update_task(task_id, event):
         return json_response(500, {"message": "Failed to update task"})
 
 
-def delete_task(task_id):
+def delete_task(task_id, user_id):
     try:
         table.delete_item(
             Key={"id": task_id},
-            ConditionExpression="attribute_exists(id)",
+            ConditionExpression="attribute_exists(id) AND user_id = :owner",
+            ExpressionAttributeValues={":owner": user_id},
         )
         log.info(json.dumps({"action": "delete_task", "id": task_id}))
         return json_response(204, None)
