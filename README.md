@@ -34,16 +34,16 @@ Lambda (task_manager.py)
   │  reserved concurrency: 50
   │  structured JSON logs → CloudWatch
   │
-  ├── GET    /tasks        → Query GSI (entity_type + created_at), newest first
-  ├── POST   /tasks        → Conditional write, return 201
-  ├── GET    /tasks/{id}   → GetItem by primary key
-  ├── PUT    /tasks/{id}   → Conditional update (404 if not found)
-  └── DELETE /tasks/{id}   → Conditional delete (404 if not found), return 204
+  ├── GET    /tasks        → Query GSI (user_id + created_at), caller's tasks only, newest first
+  ├── POST   /tasks        → Conditional write, stores user_id, return 201
+  ├── GET    /tasks/{id}   → GetItem + ownership check (404 if not owner)
+  ├── PUT    /tasks/{id}   → Conditional update (404 if not found or not owner)
+  └── DELETE /tasks/{id}   → Conditional delete (404 if not found or not owner), return 204
         │
         ▼
     DynamoDB (Tasks table)
       • Primary key: id (UUID)
-      • GSI: entity_type + created_at (for efficient list queries)
+      • GSI: user_id + created_at (per-user list queries, newest first)
       • Point-in-time recovery enabled
         │
         ▼
@@ -67,7 +67,7 @@ AWS Lambda runs Python 3.11. Reserved concurrency caps execution at 50 to preven
 Amazon API Gateway with Cognito authorizer, per-stage throttling (100 req/s rate, 200 burst), structured access logging to CloudWatch, and CORS support. Deployment uses `create_before_destroy` for zero-downtime redeploys.
 
 **Database**
-Amazon DynamoDB with on-demand billing. A Global Secondary Index on `entity_type + created_at` enables efficient list queries returning newest tasks first — no full-table scans. Point-in-time recovery allows restoration to any second within the last 35 days.
+Amazon DynamoDB with on-demand billing. A Global Secondary Index on `user_id + created_at` enables efficient per-user list queries returning newest tasks first — no full-table scans. Point-in-time recovery allows restoration to any second within the last 35 days.
 
 **Observability**
 Structured JSON logging on every Lambda log line. Five CloudWatch metric alarms covering error rate, latency, throttling, and DynamoDB health. SNS topic delivers alarm notifications to a configurable email address. Lambda and API Gateway log groups have 30-day retention.
@@ -80,14 +80,17 @@ Terraform with modular Lambda configuration, remote S3 state with DynamoDB locki
 **JWT Authentication**
 All endpoints require a valid Cognito-issued JWT in the `Authorization` header. Users register and authenticate through Cognito. API Gateway rejects any request without a valid token before Lambda is invoked.
 
-**Efficient List Queries**
-Tasks are listed using a DynamoDB Query on a GSI (`entity_type + created_at`) rather than a full-table Scan. Cost and latency scale with the page size, not the total number of tasks. Results are returned newest-first.
+**Multi-Tenant User Isolation**
+Every task is tagged with the caller's Cognito `sub` claim at creation. List queries use a GSI partitioned by `user_id` — users only ever see their own tasks. Get, update, and delete enforce ownership: requesting another user's task ID returns 404, not 403, so task existence is never revealed to unauthorized callers.
+
+**Efficient Per-User Queries**
+Tasks are listed using a DynamoDB Query on the `user_id + created_at` GSI rather than a full-table Scan. Cost and latency scale with the page size, not the total number of tasks in the table. Results are returned newest-first.
 
 **Opaque Pagination Tokens**
 The `next` cursor is base64-encoded before returning to clients. Internal DynamoDB key structure is not exposed.
 
 **Atomic Conditional Writes**
-Update and delete operations use a single DynamoDB call with `ConditionExpression="attribute_exists(id)"`. Existence is checked atomically — no separate read round trip. Returns 404 if the item does not exist.
+Update and delete operations use a single DynamoDB call with `ConditionExpression="attribute_exists(id) AND user_id = :owner"`. Existence and ownership are checked atomically — no separate read round trip. Returns 404 whether the item does not exist or belongs to a different user.
 
 **Input Validation**
 `task` description is required, must be non-empty, and cannot exceed 1000 characters. `status` and `priority` are validated against allowed values on both create and update. Validation errors return 400 with a descriptive message.
@@ -284,8 +287,8 @@ After deploying the API, requests to individual task endpoints like /tasks/{id} 
 **Challenge: CORS Configuration Across Two Layers**
 During frontend integration testing, the browser blocked all API requests with CORS errors despite having configured CORS headers in the Lambda response. The root cause was that CORS requires configuration at two separate layers. API Gateway must handle OPTIONS preflight requests and return proper Access-Control headers, AND the Lambda function must include CORS headers in every response. Configuring only one layer is insufficient because the browser sends a preflight OPTIONS request before the actual request, and both must return valid CORS headers.
 
-**Challenge: DynamoDB Scan at Scale**
-The initial list implementation used a full-table Scan on every request. At hundreds of items this was fine, but Scan reads every item in the table — at thousands of records it becomes slow and expensive, and Scan consumes capacity proportional to table size rather than result size. Adding a Global Secondary Index on `entity_type + created_at` and switching to Query resolved this. The GSI allows DynamoDB to jump directly to the right partition and return results sorted by creation time, with cost and latency scaling only with the page size.
+**Challenge: DynamoDB Scan at Scale and User Isolation**
+The initial list implementation used a full-table Scan on every request. At hundreds of items this was fine, but Scan reads every item in the table — at thousands of records it becomes slow and expensive, and Scan returns all users' tasks indiscriminately. Adding a Global Secondary Index on `user_id + created_at` and switching to Query resolved both problems simultaneously. The GSI partitions data by user so queries return only the caller's tasks, sorted by creation time, with cost and latency scaling only with the page size. Returning 404 (rather than 403) when a user requests another user's task ID means task existence is never revealed to unauthorized callers — a subtle but important security detail.
 
 **Challenge: Pagination Token Leaking Internal Schema**
 The initial implementation returned the raw DynamoDB `LastEvaluatedKey` as the pagination cursor. This object contains the actual key attribute names and types (`{"id": {"S": "abc-123"}}`), leaking internal database schema to API clients. Base64-encoding the key before returning it keeps the cursor opaque — clients treat it as an unreadable string, and the database schema remains an implementation detail.
@@ -357,7 +360,7 @@ Running equivalent functionality on a t3.small EC2 instance with an RDS db.t3.mi
 All endpoints except CORS preflight (`OPTIONS`) require a Cognito-issued JWT. Tokens are validated by API Gateway before Lambda is invoked — unauthorized requests are rejected at the edge with no Lambda cost. Cognito enforces password complexity (uppercase, lowercase, numbers, symbols, 8+ characters) and requires email verification.
 
 **Authorization**
-Lambda IAM policy is scoped to specific DynamoDB actions on the specific table and its indexes. No wildcard actions or resources. X-Ray write access uses the AWS-managed `AWSXRayDaemonWriteAccess` policy. No hardcoded credentials exist anywhere in application code or Terraform configuration.
+Every authenticated user can only access their own tasks. The Cognito `sub` claim is extracted from the JWT on every request and used to filter list queries, verify ownership on reads, and enforce ownership conditions on writes atomically. Lambda IAM policy is scoped to specific DynamoDB actions on the specific table and its indexes. No wildcard actions or resources. No hardcoded credentials exist anywhere in application code or Terraform configuration.
 
 **Network**
 API Gateway is the only public-facing endpoint. Lambda executes in AWS-managed infrastructure with no direct internet exposure. DynamoDB communication occurs over AWS internal networks using IAM-based authentication. All API traffic is encrypted in transit via HTTPS.
@@ -373,12 +376,13 @@ API Gateway enforces 100 req/s sustained and 200 burst. Lambda reserved concurre
 
 ## Future Enhancements
 
-Implement user-scoped task isolation using the Cognito `sub` claim as a secondary key — currently all authenticated users can read and modify all tasks. Add PATCH support for partial updates rather than full-replacement PUT. Configure API Gateway response caching for read-heavy workloads. Add CI/CD pipeline with GitHub Actions for automated testing and deployment on push. Implement DynamoDB Streams with a Lambda trigger for event-driven processing such as completion notifications. Add AWS WAF rules on API Gateway for SQL injection and XSS protection. Configure a custom domain with ACM certificate for a stable, human-readable API endpoint.
+Add PATCH support for partial updates rather than full-replacement PUT. Configure API Gateway response caching for read-heavy workloads. Add CI/CD pipeline with GitHub Actions for automated testing and deployment on push. Implement DynamoDB Streams with a Lambda trigger for event-driven processing such as completion notifications. Add AWS WAF rules on API Gateway for SQL injection and XSS protection. Configure a custom domain with ACM certificate for a stable, human-readable API endpoint.
 
 ## Production Readiness Checklist
 
 **Implemented**
 - JWT authentication via Cognito User Pool on all endpoints
+- Multi-tenant user isolation via Cognito sub claim (users see only their own tasks)
 - API Gateway throttling: 100 req/s rate, 200 burst
 - API Gateway structured access logs with 30-day retention
 - DynamoDB GSI for efficient list queries (no full-table scans)
@@ -397,7 +401,6 @@ Implement user-scoped task isolation using the Cognito `sub` claim as a secondar
 - Remote Terraform state with S3 + DynamoDB locking
 
 **Remaining for Full Production**
-- User-scoped task isolation (per-user data partitioning)
 - Custom domain with ACM SSL certificate
 - CI/CD pipeline with automated integration tests
 - AWS WAF on API Gateway
