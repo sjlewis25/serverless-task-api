@@ -106,6 +106,20 @@ class TestCreateTask:
         resp = task_manager.handler(event, CONTEXT)
         assert resp["statusCode"] == 400
 
+    def test_task_field_not_string(self, table):
+        resp = task_manager.handler(
+            make_event("POST", "/tasks", body={"task": 123}, user_id=USER_A), CONTEXT
+        )
+        assert resp["statusCode"] == 400
+
+    def test_created_at_is_integer_not_string(self, table):
+        resp = task_manager.handler(
+            make_event("POST", "/tasks", body={"task": "Check types"}, user_id=USER_A), CONTEXT
+        )
+        task = body(resp)["task"]
+        assert isinstance(task["created_at"], int), "created_at should be int, not string"
+        assert isinstance(task["updated_at"], int), "updated_at should be int, not string"
+
     def test_all_valid_statuses(self, table):
         for s in ("new", "in_progress", "completed", "cancelled"):
             resp = task_manager.handler(
@@ -203,6 +217,13 @@ class TestListTasks:
         assert second["statusCode"] == 200
         assert body(second)["count"] == 1
 
+    def test_list_timestamps_are_integers(self, table):
+        seed_task(table, user_id=USER_A)
+        resp = task_manager.handler(make_event("GET", "/tasks", user_id=USER_A), CONTEXT)
+        item = body(resp)["items"][0]
+        assert isinstance(item["created_at"], int), "created_at should be int in list response"
+        assert isinstance(item["updated_at"], int), "updated_at should be int in list response"
+
 
 # ─── get ─────────────────────────────────────────────────────────────────────
 
@@ -272,6 +293,14 @@ class TestUpdateTask:
         assert updated["task"] == "New"
         assert updated["status"] == "in_progress"
         assert updated["priority"] == "high"
+
+    def test_update_task_field_not_string(self, table):
+        item = seed_task(table, user_id=USER_A)
+        resp = task_manager.handler(
+            make_event("PUT", f"/tasks/{item['id']}", path_params={"id": item["id"]},
+                       body={"task": 999}, user_id=USER_A), CONTEXT
+        )
+        assert resp["statusCode"] == 400
 
     def test_update_no_fields_returns_400(self, table):
         item = seed_task(table, user_id=USER_A)

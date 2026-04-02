@@ -142,6 +142,8 @@ def create_task(event, user_id):
     if "task" not in body:
         return json_response(400, {"message": "Missing required field: task"})
 
+    if not isinstance(body["task"], str):
+        return json_response(400, {"message": "Task description must be a string"})
     task_text = body["task"].strip()
     if not task_text:
         return json_response(400, {"message": "Task description cannot be empty"})
@@ -189,6 +191,8 @@ def update_task(task_id, event, user_id):
     expr_attr_values = {":updated_at": int(time.time()), ":owner": user_id}
 
     if "task" in body:
+        if not isinstance(body["task"], str):
+            return json_response(400, {"message": "Task description must be a string"})
         task_text = body["task"].strip()
         if not task_text:
             return json_response(400, {"message": "Task description cannot be empty"})

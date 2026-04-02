@@ -1,3 +1,4 @@
+import decimal
 import json
 import os
 
@@ -10,6 +11,11 @@ DEFAULT_HEADERS = {
   "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE"
 }
 
+def _default(obj):
+  if isinstance(obj, decimal.Decimal):
+    return int(obj) if obj == int(obj) else float(obj)
+  raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
 def json_response(status, body=None, headers=None):
   h = dict(DEFAULT_HEADERS)
   if headers:
@@ -17,5 +23,5 @@ def json_response(status, body=None, headers=None):
   return {
     "statusCode": int(status),
     "headers": h,
-    "body": json.dumps(body if body is not None else {}, default=str)
+    "body": json.dumps(body if body is not None else {}, default=_default)
   }
