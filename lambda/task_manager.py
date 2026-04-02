@@ -1,6 +1,6 @@
 import base64
+import decimal
 import json
-import logging
 import os
 import time
 import uuid
@@ -8,25 +8,22 @@ import uuid
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger, Tracer
 
 from utils.response import json_response
 
-# Structured JSON logging
-class _JsonFormatter(logging.Formatter):
-    def format(self, record):
-        entry = {"level": record.levelname, "msg": record.getMessage(), "fn": record.funcName}
-        if record.exc_info:
-            entry["exc"] = self.formatException(record.exc_info)
-        return json.dumps(entry)
-
-log = logging.getLogger()
-log.setLevel(logging.INFO)
-for _h in log.handlers:
-    _h.setFormatter(_JsonFormatter())
+logger = Logger()
+tracer = Tracer()
 
 # DynamoDB
 dynamo = boto3.resource("dynamodb")
 table  = dynamo.Table(os.environ["TABLE_NAME"])
+
+def _json_default(obj):
+    if isinstance(obj, decimal.Decimal):
+        return int(obj) if obj == int(obj) else float(obj)
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
 
 GSI_NAME         = "user_id-created_at-index"
 TASK_MAX_LEN     = 1000
@@ -42,10 +39,8 @@ def _json(event):
 
 
 def _task_id_from_path(event):
-    parts = event.get("path", "").rstrip("/").split("/")
-    if len(parts) >= 3 and parts[-2] == "tasks":
-        return parts[-1]
-    return None
+    path_params = event.get("pathParameters") or {}
+    return path_params.get("id")
 
 
 def _user_id(event):
@@ -53,11 +48,13 @@ def _user_id(event):
     return event["requestContext"]["authorizer"]["claims"]["sub"]
 
 
+@logger.inject_lambda_context
+@tracer.capture_lambda_handler
 def handler(event, context):
     method  = event.get("httpMethod", "")
     path    = event.get("path", "")
     user_id = _user_id(event)
-    log.info(json.dumps({"request": f"{method} {path}", "user": user_id}))
+    logger.info(json.dumps({"request": f"{method} {path}", "user": user_id}))
 
     on_collection = path.rstrip("/").endswith("/tasks") or path == "/tasks"
     on_item       = "/tasks/" in path
@@ -86,7 +83,10 @@ def handler(event, context):
 
 def list_tasks(event, user_id):
     params = event.get("queryStringParameters") or {}
-    limit  = min(int(params.get("limit", "25")), 100)
+    try:
+        limit = min(int(params.get("limit", "25")), 100)
+    except ValueError:
+        return json_response(400, {"message": "Invalid 'limit' parameter — must be an integer"})
     token  = params.get("next")
 
     query_args = {
@@ -106,15 +106,15 @@ def list_tasks(event, user_id):
 
     try:
         resp = table.query(**query_args)
-        log.info(json.dumps({"action": "list_tasks", "count": len(resp.get("Items", []))}))
+        logger.info(json.dumps({"action": "list_tasks", "count": len(resp.get("Items", []))}))
     except Exception:
-        log.exception("DynamoDB query failed")
+        logger.exception("DynamoDB query failed")
         return json_response(500, {"message": "Failed to fetch tasks"})
 
     next_token = None
     if resp.get("LastEvaluatedKey"):
         next_token = base64.b64encode(
-            json.dumps(resp["LastEvaluatedKey"]).encode()
+            json.dumps(resp["LastEvaluatedKey"], default=_json_default).encode()
         ).decode()
 
     return json_response(200, {
@@ -129,10 +129,10 @@ def get_task(task_id, user_id):
         resp = table.get_item(Key={"id": task_id})
         if "Item" not in resp or resp["Item"].get("user_id") != user_id:
             return json_response(404, {"message": "Task not found"})
-        log.info(json.dumps({"action": "get_task", "id": task_id}))
+        logger.info(json.dumps({"action": "get_task", "id": task_id}))
         return json_response(200, resp["Item"])
     except Exception:
-        log.exception("Failed to get task %s", task_id)
+        logger.exception("Failed to get task %s", task_id)
         return json_response(500, {"message": "Failed to retrieve task"})
 
 
@@ -171,11 +171,11 @@ def create_task(event, user_id):
 
     try:
         table.put_item(Item=item, ConditionExpression="attribute_not_exists(id)")
-        log.info(json.dumps({"action": "create_task", "id": task_id}))
+        logger.info(json.dumps({"action": "create_task", "id": task_id}))
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             return json_response(409, {"message": "Task ID collision, please retry"})
-        log.exception("DynamoDB put_item failed")
+        logger.exception("DynamoDB put_item failed")
         return json_response(500, {"message": "Failed to create task"})
 
     return json_response(201, {"id": task_id, "task": item})
@@ -224,12 +224,12 @@ def update_task(task_id, event, user_id):
             ConditionExpression="attribute_exists(id) AND user_id = :owner",
             ReturnValues="ALL_NEW",
         )
-        log.info(json.dumps({"action": "update_task", "id": task_id}))
+        logger.info(json.dumps({"action": "update_task", "id": task_id}))
         return json_response(200, {"message": "Task updated", "task": resp["Attributes"]})
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             return json_response(404, {"message": "Task not found"})
-        log.exception("Failed to update task %s", task_id)
+        logger.exception("Failed to update task %s", task_id)
         return json_response(500, {"message": "Failed to update task"})
 
 
@@ -240,10 +240,10 @@ def delete_task(task_id, user_id):
             ConditionExpression="attribute_exists(id) AND user_id = :owner",
             ExpressionAttributeValues={":owner": user_id},
         )
-        log.info(json.dumps({"action": "delete_task", "id": task_id}))
+        logger.info(json.dumps({"action": "delete_task", "id": task_id}))
         return json_response(204, None)
     except ClientError as e:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             return json_response(404, {"message": "Task not found"})
-        log.exception("Failed to delete task %s", task_id)
+        logger.exception("Failed to delete task %s", task_id)
         return json_response(500, {"message": "Failed to delete task"})

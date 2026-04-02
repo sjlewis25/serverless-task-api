@@ -19,7 +19,8 @@ resource "aws_lambda_function" "task" {
 
   environment {
     variables = {
-      TABLE_NAME = var.table_name
+      TABLE_NAME  = var.table_name
+      CORS_ORIGIN = var.cors_origin
     }
   }
 

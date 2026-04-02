@@ -1,9 +1,12 @@
 import json
+import os
+
+ALLOWED_ORIGIN = os.environ.get("CORS_ORIGIN", "*")
 
 DEFAULT_HEADERS = {
   "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+  "Access-Control-Allow-Headers": "Content-Type,Authorization",
   "Access-Control-Allow-Methods": "OPTIONS,GET,POST,PUT,DELETE"
 }
 

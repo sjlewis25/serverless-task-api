@@ -156,6 +156,7 @@ module "lambda_task_manager" {
   table_name           = aws_dynamodb_table.tasks.name
   function_name        = "${var.project}-${var.environment}-task-manager"
   reserved_concurrency = 50
+  cors_origin          = var.cors_origin
 }
 
 # ========================================

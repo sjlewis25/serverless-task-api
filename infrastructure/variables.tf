@@ -42,3 +42,9 @@ variable "alert_email" {
   description = "Email address for CloudWatch alarm notifications. Leave empty to skip subscription."
   default     = ""
 }
+
+variable "enable_waf" {
+  type        = bool
+  description = "Enable AWS WAF on API Gateway. Costs ~$5/month — disable for free tier."
+  default     = false
+}
